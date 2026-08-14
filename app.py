@@ -21,7 +21,10 @@ def home():
     return {"status": "eBay API project is running"}
 
 
-@app.get("/ebay/marketplace-deletion")
+@app.api_route(
+    "/ebay/marketplace-deletion",
+    methods=["GET", "POST"]
+)
 async def marketplace_deletion(request: Request):
     challenge_code = request.query_params.get("challenge_code")
 
@@ -37,5 +40,13 @@ async def marketplace_deletion(request: Request):
         return JSONResponse(
             content={"challengeResponse": challenge_response}
         )
+
+    if request.method == "POST":
+        body = await request.json()
+
+        print("Received eBay notification:")
+        print(body)
+
+        return {"status": "notification received"}
 
     return {"status": "endpoint is working"}
