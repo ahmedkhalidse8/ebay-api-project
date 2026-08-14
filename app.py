@@ -1,12 +1,21 @@
-from fastapi import FastAPI
-from fastapi.responses import HTMLResponse
+import os
+import base64
+import secrets
+import requests
+
+from fastapi import FastAPI, HTTPException
+from fastapi.responses import RedirectResponse
 
 app = FastAPI()
 
 
+EBAY_AUTH_URL = "https://auth.ebay.com/oauth2/authorize"
+EBAY_TOKEN_URL = "https://api.ebay.com/identity/v1/oauth2/token"
+
+
 @app.get("/")
 def home():
-    return {"status": "eBay API project is running"}
+    return {"status": "SalesAnalytics API is running"}
 
 
 @app.get("/ebay/marketplace-deletion")
@@ -14,62 +23,77 @@ def marketplace_deletion():
     return {"status": "endpoint is working"}
 
 
-@app.get("/privacy", response_class=HTMLResponse)
-def privacy():
-    return """
-    <!DOCTYPE html>
-    <html>
-    <head>
-        <title>SalesAnalytics Privacy Policy</title>
-    </head>
-    <body>
-        <h1>SalesAnalytics Privacy Policy</h1>
+@app.get("/ebay/login")
+def ebay_login():
+    client_id = os.environ["EBAY_CLIENT_ID"]
+    ru_name = os.environ["EBAY_RU_NAME"]
 
-        <p>
-            SalesAnalytics is an analytics application designed to analyze
-            data from the user's eBay seller account.
-        </p>
+    state = secrets.token_urlsafe(32)
 
-        <h2>Information We Access</h2>
-        <p>
-            With the user's authorization, SalesAnalytics may access eBay
-            account and selling data through the eBay APIs, including sales,
-            order, and analytics information.
-        </p>
+    scopes = [
+        "https://api.ebay.com/oauth/api_scope",
+        "https://api.ebay.com/oauth/api_scope/sell.analytics.readonly",
+        "https://api.ebay.com/oauth/api_scope/sell.account.readonly",
+    ]
 
-        <h2>How We Use Information</h2>
-        <p>
-            The information is used solely to provide analytics, reporting,
-            business intelligence, and performance analysis for the authorized
-            eBay seller account.
-        </p>
+    scope_string = " ".join(scopes)
 
-        <h2>Data Sharing</h2>
-        <p>
-            SalesAnalytics does not sell, rent, or otherwise share eBay data
-            with third parties except where required to operate the application
-            or comply with applicable law.
-        </p>
+    authorization_url = (
+        f"{EBAY_AUTH_URL}"
+        f"?client_id={client_id}"
+        f"&response_type=code"
+        f"&redirect_uri={ru_name}"
+        f"&scope={scope_string}"
+        f"&state={state}"
+    )
 
-        <h2>Data Security</h2>
-        <p>
-            Authentication credentials and access tokens are treated as
-            confidential and are not intentionally exposed publicly.
-        </p>
+    return RedirectResponse(url=authorization_url)
 
-        <h2>Data Retention</h2>
-        <p>
-            Data is retained only as necessary for the analytics purposes
-            described above and may be deleted when it is no longer required.
-        </p>
 
-        <h2>Contact</h2>
-        <p>
-            For questions regarding this privacy policy, contact:
-            jdcontact730@gmail.com
-        </p>
+@app.get("/ebay/oauth/callback")
+def ebay_oauth_callback(code: str, state: str | None = None):
+    client_id = os.environ["EBAY_CLIENT_ID"]
+    client_secret = os.environ["EBAY_CLIENT_SECRET"]
+    ru_name = os.environ["EBAY_RU_NAME"]
 
-        <p>Last updated: August 14, 2026</p>
-    </body>
-    </html>
-    """
+    credentials = f"{client_id}:{client_secret}"
+    encoded_credentials = base64.b64encode(
+        credentials.encode()
+    ).decode()
+
+    headers = {
+        "Content-Type": "application/x-www-form-urlencoded",
+        "Authorization": f"Basic {encoded_credentials}",
+    }
+
+    data = {
+        "grant_type": "authorization_code",
+        "code": code,
+        "redirect_uri": ru_name,
+    }
+
+    response = requests.post(
+        EBAY_TOKEN_URL,
+        headers=headers,
+        data=data,
+        timeout=30,
+    )
+
+    if response.status_code != 200:
+        raise HTTPException(
+            status_code=response.status_code,
+            detail=response.text,
+        )
+
+    token_data = response.json()
+
+    return {
+        "status": "OAuth token exchange successful",
+        "expires_in": token_data.get("expires_in"),
+        "refresh_token_received": bool(
+            token_data.get("refresh_token")
+        ),
+        "access_token_received": bool(
+            token_data.get("access_token")
+        ),
+    }
