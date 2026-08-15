@@ -17,8 +17,18 @@ app = FastAPI()
 
 EBAY_AUTH_URL = "https://auth.ebay.com/oauth2/authorize"
 EBAY_TOKEN_URL = "https://api.ebay.com/identity/v1/oauth2/token"
-EBAY_TRAFFIC_URL = "https://api.ebay.com/sell/analytics/v1/traffic_report"
-EBAY_ORDERS_URL = "https://api.ebay.com/sell/fulfillment/v1/order"
+
+EBAY_TRAFFIC_URL = (
+    "https://api.ebay.com/sell/analytics/v1/traffic_report"
+)
+
+EBAY_ORDERS_URL = (
+    "https://api.ebay.com/sell/fulfillment/v1/order"
+)
+
+EBAY_INVENTORY_URL = (
+    "https://api.ebay.com/sell/inventory/v1/inventory_item"
+)
 
 
 # ============================================================
@@ -33,7 +43,7 @@ def home():
 
 
 # ============================================================
-# Marketplace Deletion
+# eBay Marketplace Deletion Endpoint
 # ============================================================
 
 @app.get("/ebay/marketplace-deletion")
@@ -53,6 +63,7 @@ def ebay_login():
     client_id = os.environ["EBAY_CLIENT_ID"]
     ru_name = os.environ["EBAY_RU_NAME"]
 
+    # CSRF protection state
     state = secrets.token_urlsafe(32)
 
     scopes = [
@@ -60,6 +71,7 @@ def ebay_login():
         "https://api.ebay.com/oauth/api_scope/sell.analytics.readonly",
         "https://api.ebay.com/oauth/api_scope/sell.account.readonly",
         "https://api.ebay.com/oauth/api_scope/sell.fulfillment.readonly",
+        "https://api.ebay.com/oauth/api_scope/sell.inventory.readonly",
     ]
 
     scope_string = " ".join(scopes)
@@ -73,7 +85,9 @@ def ebay_login():
         f"&state={state}"
     )
 
-    return RedirectResponse(url=authorization_url)
+    return RedirectResponse(
+        url=authorization_url
+    )
 
 
 # ============================================================
@@ -91,7 +105,7 @@ def ebay_oauth_callback(
     ru_name = os.environ["EBAY_RU_NAME"]
 
     # --------------------------------------------------------
-    # Exchange authorization code for tokens
+    # Exchange authorization code for OAuth tokens
     # --------------------------------------------------------
 
     credentials = f"{client_id}:{client_secret}"
@@ -138,6 +152,15 @@ def ebay_oauth_callback(
         )
 
     # ========================================================
+    # Common API Headers
+    # ========================================================
+
+    api_headers = {
+        "Authorization": f"Bearer {access_token}",
+        "Accept": "application/json",
+    }
+
+    # ========================================================
     # Step 3: Traffic Report
     # ========================================================
 
@@ -148,10 +171,9 @@ def ebay_oauth_callback(
         "dimension": "DAY",
         "filter": (
             f"marketplace_ids:{{EBAY_US}},"
-            f"date_range:["
-            f"{traffic_start_date.strftime('%Y%m%d')}.."
-            f"{traffic_end_date.strftime('%Y%m%d')}"
-            f"]"
+            f"date_range:"
+            f"[{traffic_start_date.strftime('%Y%m%d')}.."
+            f"{traffic_end_date.strftime('%Y%m%d')}]"
         ),
         "metric": (
             "TOTAL_IMPRESSION_TOTAL,"
@@ -159,11 +181,6 @@ def ebay_oauth_callback(
             "TRANSACTION,"
             "SALES_CONVERSION_RATE"
         ),
-    }
-
-    api_headers = {
-        "Authorization": f"Bearer {access_token}",
-        "Accept": "application/json",
     }
 
     traffic_response = requests.get(
@@ -189,7 +206,6 @@ def ebay_oauth_callback(
     # Step 4: Orders
     # ========================================================
 
-    # Use only completed days.
     orders_end_date = date.today() - timedelta(days=1)
     orders_start_date = orders_end_date - timedelta(days=30)
 
@@ -223,11 +239,42 @@ def ebay_oauth_callback(
     orders_data = orders_response.json()
 
     # ========================================================
-    # Step 5: Return Results
+    # Step 5: Active Listings / Inventory
+    # ========================================================
+
+    inventory_params = {
+        "limit": 100,
+        "offset": 0,
+    }
+
+    inventory_response = requests.get(
+        EBAY_INVENTORY_URL,
+        headers=api_headers,
+        params=inventory_params,
+        timeout=30,
+    )
+
+    if inventory_response.status_code != 200:
+        raise HTTPException(
+            status_code=inventory_response.status_code,
+            detail={
+                "message": "Inventory API failed",
+                "request_url": inventory_response.url,
+                "ebay_response": inventory_response.text,
+            },
+        )
+
+    inventory_data = inventory_response.json()
+
+    # ========================================================
+    # Step 6: Return All API Data
     # ========================================================
 
     return {
-        "status": "eBay OAuth + Traffic + Orders API successful",
+        "status": (
+            "eBay OAuth + Traffic + Orders + "
+            "Inventory API successful"
+        ),
 
         "traffic_date_range": {
             "start": traffic_start_date.isoformat(),
@@ -252,4 +299,6 @@ def ebay_oauth_callback(
         "traffic_report": traffic_data,
 
         "orders": orders_data,
+
+        "inventory": inventory_data,
     }
