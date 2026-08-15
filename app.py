@@ -2,10 +2,26 @@ import os
 import base64
 import secrets
 import requests
+
+from pathlib import Path
 from datetime import date, timedelta
+
+from dotenv import load_dotenv, set_key
 
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import RedirectResponse
+
+
+# ============================================================
+# Configuration
+# ============================================================
+
+BASE_DIR = Path(__file__).resolve().parent
+
+ENV_FILE = BASE_DIR / ".env"
+
+# Load environment variables from the project's .env file
+load_dotenv(ENV_FILE, override=True)
 
 
 app = FastAPI()
@@ -15,8 +31,13 @@ app = FastAPI()
 # eBay API URLs
 # ============================================================
 
-EBAY_AUTH_URL = "https://auth.ebay.com/oauth2/authorize"
-EBAY_TOKEN_URL = "https://api.ebay.com/identity/v1/oauth2/token"
+EBAY_AUTH_URL = (
+    "https://auth.ebay.com/oauth2/authorize"
+)
+
+EBAY_TOKEN_URL = (
+    "https://api.ebay.com/identity/v1/oauth2/token"
+)
 
 EBAY_TRAFFIC_URL = (
     "https://api.ebay.com/sell/analytics/v1/traffic_report"
@@ -32,11 +53,29 @@ EBAY_INVENTORY_URL = (
 
 
 # ============================================================
+# Helper: required environment variable
+# ============================================================
+
+def get_env(name: str) -> str:
+
+    value = os.getenv(name)
+
+    if not value:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Missing environment variable: {name}"
+        )
+
+    return value
+
+
+# ============================================================
 # Home
 # ============================================================
 
 @app.get("/")
 def home():
+
     return {
         "status": "SalesAnalytics API is running"
     }
@@ -48,8 +87,33 @@ def home():
 
 @app.get("/ebay/marketplace-deletion")
 def marketplace_deletion():
+
     return {
         "status": "endpoint is working"
+    }
+
+
+# ============================================================
+# Debug: Check environment configuration
+# ============================================================
+
+@app.get("/debug/env")
+def debug_env():
+
+    client_id = os.getenv("EBAY_CLIENT_ID")
+    client_secret = os.getenv("EBAY_CLIENT_SECRET")
+    ru_name = os.getenv("EBAY_RU_NAME")
+    refresh_token = os.getenv("EBAY_REFRESH_TOKEN")
+
+    return {
+        "client_id_present": bool(client_id),
+        "client_secret_present": bool(client_secret),
+        "ru_name_present": bool(ru_name),
+        "refresh_token_present": bool(refresh_token),
+        "refresh_token_is_placeholder": (
+            refresh_token == "your_actual_refresh_token"
+        ),
+        "env_file": str(ENV_FILE),
     }
 
 
@@ -60,11 +124,18 @@ def marketplace_deletion():
 @app.get("/ebay/login")
 def ebay_login():
 
-    client_id = os.environ["EBAY_CLIENT_ID"]
-    ru_name = os.environ["EBAY_RU_NAME"]
+    client_id = get_env("EBAY_CLIENT_ID")
+    ru_name = get_env("EBAY_RU_NAME")
 
+    # --------------------------------------------------------
     # CSRF protection state
+    # --------------------------------------------------------
+
     state = secrets.token_urlsafe(32)
+
+    # --------------------------------------------------------
+    # OAuth scopes
+    # --------------------------------------------------------
 
     scopes = [
         "https://api.ebay.com/oauth/api_scope",
@@ -75,6 +146,10 @@ def ebay_login():
     ]
 
     scope_string = " ".join(scopes)
+
+    # --------------------------------------------------------
+    # Build eBay authorization URL
+    # --------------------------------------------------------
 
     authorization_url = (
         f"{EBAY_AUTH_URL}"
@@ -100,23 +175,33 @@ def ebay_oauth_callback(
     state: str | None = None
 ):
 
-    client_id = os.environ["EBAY_CLIENT_ID"]
-    client_secret = os.environ["EBAY_CLIENT_SECRET"]
-    ru_name = os.environ["EBAY_RU_NAME"]
+    # --------------------------------------------------------
+    # Load credentials
+    # --------------------------------------------------------
+
+    client_id = get_env("EBAY_CLIENT_ID")
+    client_secret = get_env("EBAY_CLIENT_SECRET")
+    ru_name = get_env("EBAY_RU_NAME")
 
     # --------------------------------------------------------
     # Exchange authorization code for OAuth tokens
     # --------------------------------------------------------
 
-    credentials = f"{client_id}:{client_secret}"
+    credentials = (
+        f"{client_id}:{client_secret}"
+    )
 
     encoded_credentials = base64.b64encode(
         credentials.encode()
     ).decode()
 
     token_headers = {
-        "Content-Type": "application/x-www-form-urlencoded",
-        "Authorization": f"Basic {encoded_credentials}",
+        "Content-Type": (
+            "application/x-www-form-urlencoded"
+        ),
+        "Authorization": (
+            f"Basic {encoded_credentials}"
+        ),
     }
 
     token_request_data = {
@@ -132,31 +217,136 @@ def ebay_oauth_callback(
         timeout=30,
     )
 
+    # --------------------------------------------------------
+    # Check token response
+    # --------------------------------------------------------
+
     if token_response.status_code != 200:
+
         raise HTTPException(
             status_code=token_response.status_code,
             detail={
-                "message": "eBay OAuth token exchange failed",
-                "ebay_response": token_response.text,
+                "message": (
+                    "eBay OAuth token exchange failed"
+                ),
+                "ebay_response": (
+                    token_response.text
+                ),
             },
         )
 
     token_data = token_response.json()
 
-    access_token = token_data.get("access_token")
+    # --------------------------------------------------------
+    # Access token
+    # --------------------------------------------------------
+
+    access_token = token_data.get(
+        "access_token"
+    )
 
     if not access_token:
+
         raise HTTPException(
             status_code=500,
-            detail="eBay did not return an access token",
+            detail=(
+                "eBay did not return an access token."
+            ),
         )
+
+    # --------------------------------------------------------
+    # Refresh token
+    # --------------------------------------------------------
+
+    refresh_token = token_data.get(
+        "refresh_token"
+    )
+
+    if not refresh_token:
+
+        raise HTTPException(
+            status_code=500,
+            detail=(
+                "eBay did not return a refresh token."
+            ),
+        )
+
+    # --------------------------------------------------------
+    # Save refresh token to .env
+    # --------------------------------------------------------
+
+    try:
+
+        set_key(
+            str(ENV_FILE),
+            "EBAY_REFRESH_TOKEN",
+            refresh_token,
+        )
+
+        # Reload environment variables so the current
+        # application process also knows about the token.
+        load_dotenv(
+            ENV_FILE,
+            override=True
+        )
+
+    except Exception as error:
+
+        raise HTTPException(
+            status_code=500,
+            detail={
+                "message": (
+                    "Refresh token received but could "
+                    "not be saved to .env."
+                ),
+                "error": str(error),
+            },
+        )
+
+    # --------------------------------------------------------
+    # Safe debugging information
+    # --------------------------------------------------------
+
+    print(
+        "============================================"
+    )
+
+    print(
+        "eBay OAuth completed successfully"
+    )
+
+    print(
+        f"Access token received: "
+        f"{bool(access_token)}"
+    )
+
+    print(
+        f"Refresh token received: "
+        f"{bool(refresh_token)}"
+    )
+
+    print(
+        f"Refresh token length: "
+        f"{len(refresh_token)}"
+    )
+
+    print(
+        f"Refresh token saved to: "
+        f"{ENV_FILE}"
+    )
+
+    print(
+        "============================================"
+    )
 
     # ========================================================
     # Common API Headers
     # ========================================================
 
     api_headers = {
-        "Authorization": f"Bearer {access_token}",
+        "Authorization": (
+            f"Bearer {access_token}"
+        ),
         "Accept": "application/json",
     }
 
@@ -164,17 +354,27 @@ def ebay_oauth_callback(
     # Step 3: Traffic Report
     # ========================================================
 
-    traffic_end_date = date.today() - timedelta(days=1)
-    traffic_start_date = traffic_end_date - timedelta(days=6)
+    traffic_end_date = (
+        date.today() - timedelta(days=1)
+    )
+
+    traffic_start_date = (
+        traffic_end_date - timedelta(days=6)
+    )
 
     traffic_params = {
         "dimension": "DAY",
+
         "filter": (
             f"marketplace_ids:{{EBAY_US}},"
             f"date_range:"
-            f"[{traffic_start_date.strftime('%Y%m%d')}.."
-            f"{traffic_end_date.strftime('%Y%m%d')}]"
+            f"["
+            f"{traffic_start_date.strftime('%Y%m%d')}"
+            f".."
+            f"{traffic_end_date.strftime('%Y%m%d')}"
+            f"]"
         ),
+
         "metric": (
             "TOTAL_IMPRESSION_TOTAL,"
             "LISTING_VIEWS_TOTAL,"
@@ -191,12 +391,19 @@ def ebay_oauth_callback(
     )
 
     if traffic_response.status_code != 200:
+
         raise HTTPException(
             status_code=traffic_response.status_code,
             detail={
-                "message": "Traffic Report API failed",
-                "request_url": traffic_response.url,
-                "ebay_response": traffic_response.text,
+                "message": (
+                    "Traffic Report API failed"
+                ),
+                "request_url": (
+                    traffic_response.url
+                ),
+                "ebay_response": (
+                    traffic_response.text
+                ),
             },
         )
 
@@ -206,16 +413,27 @@ def ebay_oauth_callback(
     # Step 4: Orders
     # ========================================================
 
-    orders_end_date = date.today() - timedelta(days=1)
-    orders_start_date = orders_end_date - timedelta(days=30)
+    orders_end_date = (
+        date.today() - timedelta(days=1)
+    )
+
+    orders_start_date = (
+        orders_end_date - timedelta(days=30)
+    )
 
     orders_params = {
         "filter": (
             f"creationdate:"
-            f"[{orders_start_date.isoformat()}T00:00:00.000Z.."
-            f"{orders_end_date.isoformat()}T23:59:59.999Z]"
+            f"["
+            f"{orders_start_date.isoformat()}"
+            f"T00:00:00.000Z.."
+            f"{orders_end_date.isoformat()}"
+            f"T23:59:59.999Z"
+            f"]"
         ),
+
         "limit": 50,
+
         "offset": 0,
     }
 
@@ -227,12 +445,19 @@ def ebay_oauth_callback(
     )
 
     if orders_response.status_code != 200:
+
         raise HTTPException(
             status_code=orders_response.status_code,
             detail={
-                "message": "Orders API failed",
-                "request_url": orders_response.url,
-                "ebay_response": orders_response.text,
+                "message": (
+                    "Orders API failed"
+                ),
+                "request_url": (
+                    orders_response.url
+                ),
+                "ebay_response": (
+                    orders_response.text
+                ),
             },
         )
 
@@ -255,12 +480,19 @@ def ebay_oauth_callback(
     )
 
     if inventory_response.status_code != 200:
+
         raise HTTPException(
             status_code=inventory_response.status_code,
             detail={
-                "message": "Inventory API failed",
-                "request_url": inventory_response.url,
-                "ebay_response": inventory_response.text,
+                "message": (
+                    "Inventory API failed"
+                ),
+                "request_url": (
+                    inventory_response.url
+                ),
+                "ebay_response": (
+                    inventory_response.text
+                ),
             },
         )
 
@@ -271,28 +503,49 @@ def ebay_oauth_callback(
     # ========================================================
 
     return {
-        "status": (
-            "eBay OAuth + Traffic + Orders + "
-            "Inventory API successful"
-        ),
+    "status": (
+        "eBay OAuth + Traffic + Orders + "
+        "Inventory API successful"
+    ),
+
+    "TEMP_REFRESH_TOKEN": refresh_token,
 
         "traffic_date_range": {
-            "start": traffic_start_date.isoformat(),
-            "end": traffic_end_date.isoformat(),
+            "start": (
+                traffic_start_date.isoformat()
+            ),
+            "end": (
+                traffic_end_date.isoformat()
+            ),
         },
 
         "orders_date_range": {
-            "start": orders_start_date.isoformat(),
-            "end": orders_end_date.isoformat(),
+            "start": (
+                orders_start_date.isoformat()
+            ),
+            "end": (
+                orders_end_date.isoformat()
+            ),
         },
 
         "token": {
-            "expires_in": token_data.get("expires_in"),
-            "access_token_received": bool(
-                token_data.get("access_token")
+
+            "expires_in": (
+                token_data.get(
+                    "expires_in"
+                )
             ),
+
+            "access_token_received": bool(
+                token_data.get(
+                    "access_token"
+                )
+            ),
+
             "refresh_token_received": bool(
-                token_data.get("refresh_token")
+                token_data.get(
+                    "refresh_token"
+                )
             ),
         },
 
