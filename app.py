@@ -18,6 +18,7 @@ app = FastAPI()
 EBAY_AUTH_URL = "https://auth.ebay.com/oauth2/authorize"
 EBAY_TOKEN_URL = "https://api.ebay.com/identity/v1/oauth2/token"
 EBAY_TRAFFIC_URL = "https://api.ebay.com/sell/analytics/v1/traffic_report"
+EBAY_ORDERS_URL = "https://api.ebay.com/sell/fulfillment/v1/order"
 
 
 # ============================================================
@@ -43,7 +44,7 @@ def marketplace_deletion():
 
 
 # ============================================================
-# Step 1: Send user to eBay Login
+# Step 1: eBay Login
 # ============================================================
 
 @app.get("/ebay/login")
@@ -52,13 +53,13 @@ def ebay_login():
     client_id = os.environ["EBAY_CLIENT_ID"]
     ru_name = os.environ["EBAY_RU_NAME"]
 
-    # Generate CSRF protection state
     state = secrets.token_urlsafe(32)
 
     scopes = [
         "https://api.ebay.com/oauth/api_scope",
         "https://api.ebay.com/oauth/api_scope/sell.analytics.readonly",
         "https://api.ebay.com/oauth/api_scope/sell.account.readonly",
+        "https://api.ebay.com/oauth/api_scope/sell.fulfillment.readonly",
     ]
 
     scope_string = " ".join(scopes)
@@ -72,13 +73,11 @@ def ebay_login():
         f"&state={state}"
     )
 
-    return RedirectResponse(
-        url=authorization_url
-    )
+    return RedirectResponse(url=authorization_url)
 
 
 # ============================================================
-# Step 2: eBay OAuth Callback
+# Step 2: OAuth Callback
 # ============================================================
 
 @app.get("/ebay/oauth/callback")
@@ -106,7 +105,7 @@ def ebay_oauth_callback(
         "Authorization": f"Basic {encoded_credentials}",
     }
 
-    token_data_request = {
+    token_request_data = {
         "grant_type": "authorization_code",
         "code": code,
         "redirect_uri": ru_name,
@@ -115,7 +114,7 @@ def ebay_oauth_callback(
     token_response = requests.post(
         EBAY_TOKEN_URL,
         headers=token_headers,
-        data=token_data_request,
+        data=token_request_data,
         timeout=30,
     )
 
@@ -139,23 +138,21 @@ def ebay_oauth_callback(
         )
 
     # ========================================================
-    # Step 3: Call eBay Traffic Report API
+    # Step 3: Traffic Report
     # ========================================================
 
-    # Get the last 7 complete days.
-    # This avoids asking for a future/current partial day.
     end_date = date.today() - timedelta(days=1)
     start_date = end_date - timedelta(days=6)
 
     traffic_params = {
         "dimension": "DAY",
-
         "filter": (
             f"marketplace_ids:{{EBAY_US}},"
-            f"date_range:[{start_date.strftime('%Y%m%d')}.."
-            f"{end_date.strftime('%Y%m%d')}]"
+            f"date_range:["
+            f"{start_date.strftime('%Y%m%d')}.."
+            f"{end_date.strftime('%Y%m%d')}"
+            f"]"
         ),
-
         "metric": (
             "TOTAL_IMPRESSION_TOTAL,"
             "LISTING_VIEWS_TOTAL,"
@@ -164,28 +161,23 @@ def ebay_oauth_callback(
         ),
     }
 
-    traffic_headers = {
+    api_headers = {
         "Authorization": f"Bearer {access_token}",
         "Accept": "application/json",
     }
 
     traffic_response = requests.get(
         EBAY_TRAFFIC_URL,
-        headers=traffic_headers,
+        headers=api_headers,
         params=traffic_params,
         timeout=30,
     )
 
-    # --------------------------------------------------------
-    # Handle Analytics API errors
-    # --------------------------------------------------------
-
     if traffic_response.status_code != 200:
-
         raise HTTPException(
             status_code=traffic_response.status_code,
             detail={
-                "message": "OAuth succeeded, but eBay Traffic Report failed",
+                "message": "Traffic Report API failed",
                 "request_url": traffic_response.url,
                 "ebay_response": traffic_response.text,
             },
@@ -194,15 +186,58 @@ def ebay_oauth_callback(
     traffic_data = traffic_response.json()
 
     # ========================================================
-    # Step 4: Return successful result
+    # Step 4: Orders
+    # ========================================================
+
+    # eBay Fulfillment API allows order searches using
+    # creationdate filters. We request the last 30 days here.
+    orders_end = date.today()
+    orders_start = orders_end - timedelta(days=30)
+
+    orders_params = {
+        "filter": (
+            f"creationdate:"
+            f"[{orders_start.isoformat()}T00:00:00.000Z.."
+            f"{orders_end.isoformat()}T23:59:59.999Z]"
+        ),
+        "limit": 50,
+        "offset": 0,
+    }
+
+    orders_response = requests.get(
+        EBAY_ORDERS_URL,
+        headers=api_headers,
+        params=orders_params,
+        timeout=30,
+    )
+
+    if orders_response.status_code != 200:
+        raise HTTPException(
+            status_code=orders_response.status_code,
+            detail={
+                "message": "Orders API failed",
+                "request_url": orders_response.url,
+                "ebay_response": orders_response.text,
+            },
+        )
+
+    orders_data = orders_response.json()
+
+    # ========================================================
+    # Step 5: Return Everything
     # ========================================================
 
     return {
-        "status": "eBay OAuth + Analytics API successful",
+        "status": "eBay OAuth + Traffic + Orders API successful",
 
-        "date_range": {
+        "traffic_date_range": {
             "start": start_date.isoformat(),
             "end": end_date.isoformat(),
+        },
+
+        "orders_date_range": {
+            "start": orders_start.isoformat(),
+            "end": orders_end.isoformat(),
         },
 
         "token": {
@@ -216,4 +251,6 @@ def ebay_oauth_callback(
         },
 
         "traffic_report": traffic_data,
+
+        "orders": orders_data,
     }
