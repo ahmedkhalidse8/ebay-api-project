@@ -33,7 +33,7 @@ def home():
 
 
 # ============================================================
-# eBay Marketplace Deletion Endpoint
+# Marketplace Deletion
 # ============================================================
 
 @app.get("/ebay/marketplace-deletion")
@@ -141,16 +141,16 @@ def ebay_oauth_callback(
     # Step 3: Traffic Report
     # ========================================================
 
-    end_date = date.today() - timedelta(days=1)
-    start_date = end_date - timedelta(days=6)
+    traffic_end_date = date.today() - timedelta(days=1)
+    traffic_start_date = traffic_end_date - timedelta(days=6)
 
     traffic_params = {
         "dimension": "DAY",
         "filter": (
             f"marketplace_ids:{{EBAY_US}},"
             f"date_range:["
-            f"{start_date.strftime('%Y%m%d')}.."
-            f"{end_date.strftime('%Y%m%d')}"
+            f"{traffic_start_date.strftime('%Y%m%d')}.."
+            f"{traffic_end_date.strftime('%Y%m%d')}"
             f"]"
         ),
         "metric": (
@@ -189,16 +189,15 @@ def ebay_oauth_callback(
     # Step 4: Orders
     # ========================================================
 
-    # eBay Fulfillment API allows order searches using
-    # creationdate filters. We request the last 30 days here.
-    orders_end = date.today()
-    orders_start = orders_end - timedelta(days=30)
+    # Use only completed days.
+    orders_end_date = date.today() - timedelta(days=1)
+    orders_start_date = orders_end_date - timedelta(days=30)
 
     orders_params = {
         "filter": (
             f"creationdate:"
-            f"[{orders_start.isoformat()}T00:00:00.000Z.."
-            f"{orders_end.isoformat()}T23:59:59.999Z]"
+            f"[{orders_start_date.isoformat()}T00:00:00.000Z.."
+            f"{orders_end_date.isoformat()}T23:59:59.999Z]"
         ),
         "limit": 50,
         "offset": 0,
@@ -224,20 +223,20 @@ def ebay_oauth_callback(
     orders_data = orders_response.json()
 
     # ========================================================
-    # Step 5: Return Everything
+    # Step 5: Return Results
     # ========================================================
 
     return {
         "status": "eBay OAuth + Traffic + Orders API successful",
 
         "traffic_date_range": {
-            "start": start_date.isoformat(),
-            "end": end_date.isoformat(),
+            "start": traffic_start_date.isoformat(),
+            "end": traffic_end_date.isoformat(),
         },
 
         "orders_date_range": {
-            "start": orders_start.isoformat(),
-            "end": orders_end.isoformat(),
+            "start": orders_start_date.isoformat(),
+            "end": orders_end_date.isoformat(),
         },
 
         "token": {
