@@ -335,63 +335,83 @@ def test_auth():
 
 def get_traffic_report(access_token):
 
-    end_date = (
-        date.today() - timedelta(days=1)
-    )
+    end_date = date.today() - timedelta(days=1)
 
-    start_date = (
-        end_date - timedelta(days=6)
-    )
+    start_date = end_date - timedelta(days=730)
 
     headers = {
-        "Authorization": (
-            f"Bearer {access_token}"
-        ),
-
+        "Authorization": f"Bearer {access_token}",
         "Accept": "application/json",
     }
 
-    params = {
+    all_records = []
 
-        "dimension": "DAY",
+    current_start = start_date
 
-        "filter": (
-            f"marketplace_ids:{{EBAY_US}},"
-            f"date_range:"
-            f"["
-            f"{start_date.strftime('%Y%m%d')}"
-            f".."
-            f"{end_date.strftime('%Y%m%d')}"
-            f"]"
-        ),
+    while current_start <= end_date:
 
-        "metric": (
-            "TOTAL_IMPRESSION_TOTAL,"
-            "LISTING_VIEWS_TOTAL,"
-            "TRANSACTION,"
-            "SALES_CONVERSION_RATE"
-        ),
-    }
-
-    response = requests.get(
-        EBAY_TRAFFIC_URL,
-        headers=headers,
-        params=params,
-        timeout=30,
-    )
-
-    if response.status_code != 200:
-
-        raise HTTPException(
-            status_code=response.status_code,
-            detail={
-                "message": (
-                    "Traffic Report API failed"
-                ),
-
-                "ebay_response": response.text,
-            },
+        current_end = min(
+            current_start + timedelta(days=89),
+            end_date
         )
+
+        params = {
+            "dimension": "DAY",
+
+            "filter": (
+                f"marketplace_ids:{{EBAY_US}},"
+                f"date_range:"
+                f"["
+                f"{current_start.strftime('%Y%m%d')}"
+                f".."
+                f"{current_end.strftime('%Y%m%d')}"
+                f"]"
+            ),
+
+            "metric": (
+                "TOTAL_IMPRESSION_TOTAL,"
+                "LISTING_VIEWS_TOTAL,"
+                "TRANSACTION,"
+                "SALES_CONVERSION_RATE"
+            ),
+        }
+
+        response = requests.get(
+            EBAY_TRAFFIC_URL,
+            headers=headers,
+            params=params,
+            timeout=30,
+        )
+
+        if response.status_code != 200:
+
+            raise HTTPException(
+                status_code=response.status_code,
+                detail={
+                    "message": "Traffic Report API failed",
+
+                    "date_range": (
+                        f"{current_start.isoformat()} "
+                        f"to {current_end.isoformat()}"
+                    ),
+
+                    "ebay_response": response.text,
+                },
+            )
+
+        data = response.json()
+
+        records = data.get("records", [])
+
+        all_records.extend(records)
+
+        print(
+            f"Traffic retrieved: "
+            f"{current_start} → {current_end} "
+            f"({len(records)} records)"
+        )
+
+        current_start = current_end + timedelta(days=1)
 
     return {
         "date_range": {
@@ -399,7 +419,7 @@ def get_traffic_report(access_token):
             "end": end_date.isoformat(),
         },
 
-        "data": response.json(),
+        "records": all_records,
     }
 
 
