@@ -431,7 +431,7 @@ def get_orders(access_token):
 
     end_date = date.today() - timedelta(days=1)
 
-    start_date = end_date - timedelta(days=730)
+    start_date = end_date - timedelta(days=729)
 
     headers = {
         "Authorization": f"Bearer {access_token}",
