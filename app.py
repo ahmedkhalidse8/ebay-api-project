@@ -337,7 +337,7 @@ def get_traffic_report(access_token):
 
     end_date = date.today() - timedelta(days=1)
 
-    start_date = end_date - timedelta(days=729)
+    start_date = end_date - timedelta(days=720)
 
     headers = {
         "Authorization": f"Bearer {access_token}",
@@ -431,7 +431,7 @@ def get_orders(access_token):
 
     end_date = date.today() - timedelta(days=1)
 
-    start_date = end_date - timedelta(days=729)
+    start_date = end_date - timedelta(days=720)
 
     headers = {
         "Authorization": f"Bearer {access_token}",
