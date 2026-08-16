@@ -1,10 +1,12 @@
 import os
 import base64
+import secrets
 import requests
 
 from datetime import date, timedelta
 
 from fastapi import FastAPI, HTTPException
+from fastapi.responses import RedirectResponse
 
 
 app = FastAPI()
@@ -13,6 +15,10 @@ app = FastAPI()
 # ============================================================
 # eBay API URLs
 # ============================================================
+
+EBAY_AUTH_URL = (
+    "https://auth.ebay.com/oauth2/authorize"
+)
 
 EBAY_TOKEN_URL = (
     "https://api.ebay.com/identity/v1/oauth2/token"
@@ -61,7 +67,7 @@ def home():
 
 
 # ============================================================
-# eBay Marketplace Deletion Endpoint
+# Marketplace Deletion
 # ============================================================
 
 @app.get("/ebay/marketplace-deletion")
@@ -73,30 +79,164 @@ def marketplace_deletion():
 
 
 # ============================================================
-# Debug environment
+# Debug Environment
 # ============================================================
 
 @app.get("/debug/env")
 def debug_env():
 
-    client_id = os.getenv("EBAY_CLIENT_ID")
-    client_secret = os.getenv("EBAY_CLIENT_SECRET")
-    ru_name = os.getenv("EBAY_RU_NAME")
-    refresh_token = os.getenv("EBAY_REFRESH_TOKEN")
-
     return {
-        "client_id_present": bool(client_id),
-        "client_secret_present": bool(client_secret),
-        "ru_name_present": bool(ru_name),
-        "refresh_token_present": bool(refresh_token),
-        "refresh_token_is_placeholder": (
-            refresh_token == "your_actual_refresh_token"
+        "client_id_present": bool(
+            os.getenv("EBAY_CLIENT_ID")
+        ),
+
+        "client_secret_present": bool(
+            os.getenv("EBAY_CLIENT_SECRET")
+        ),
+
+        "ru_name_present": bool(
+            os.getenv("EBAY_RU_NAME")
+        ),
+
+        "refresh_token_present": bool(
+            os.getenv("EBAY_REFRESH_TOKEN")
         ),
     }
 
 
 # ============================================================
-# Step 1: Get Access Token Using Refresh Token
+# Step 1: eBay Login
+# ============================================================
+
+@app.get("/ebay/login")
+def ebay_login():
+
+    client_id = get_env("EBAY_CLIENT_ID")
+    ru_name = get_env("EBAY_RU_NAME")
+
+    state = secrets.token_urlsafe(32)
+
+    scopes = [
+        "https://api.ebay.com/oauth/api_scope",
+
+        "https://api.ebay.com/oauth/api_scope/"
+        "sell.analytics.readonly",
+
+        "https://api.ebay.com/oauth/api_scope/"
+        "sell.account.readonly",
+
+        "https://api.ebay.com/oauth/api_scope/"
+        "sell.fulfillment.readonly",
+
+        "https://api.ebay.com/oauth/api_scope/"
+        "sell.inventory.readonly",
+    ]
+
+    authorization_url = (
+        f"{EBAY_AUTH_URL}"
+        f"?client_id={client_id}"
+        f"&response_type=code"
+        f"&redirect_uri={ru_name}"
+        f"&scope={' '.join(scopes)}"
+        f"&state={state}"
+    )
+
+    return RedirectResponse(
+        url=authorization_url
+    )
+
+
+# ============================================================
+# Step 2: OAuth Callback
+# ============================================================
+
+@app.get("/ebay/oauth/callback")
+def ebay_oauth_callback(
+    code: str,
+    state: str | None = None
+):
+
+    client_id = get_env("EBAY_CLIENT_ID")
+    client_secret = get_env("EBAY_CLIENT_SECRET")
+    ru_name = get_env("EBAY_RU_NAME")
+
+    credentials = (
+        f"{client_id}:{client_secret}"
+    )
+
+    encoded_credentials = base64.b64encode(
+        credentials.encode()
+    ).decode()
+
+    headers = {
+        "Content-Type": (
+            "application/x-www-form-urlencoded"
+        ),
+
+        "Authorization": (
+            f"Basic {encoded_credentials}"
+        ),
+    }
+
+    data = {
+        "grant_type": "authorization_code",
+        "code": code,
+        "redirect_uri": ru_name,
+    }
+
+    response = requests.post(
+        EBAY_TOKEN_URL,
+        headers=headers,
+        data=data,
+        timeout=30,
+    )
+
+    if response.status_code != 200:
+
+        raise HTTPException(
+            status_code=response.status_code,
+            detail={
+                "message": "eBay OAuth token exchange failed",
+                "ebay_response": response.text,
+            },
+        )
+
+    token_data = response.json()
+
+    refresh_token = token_data.get(
+        "refresh_token"
+    )
+
+    if not refresh_token:
+
+        raise HTTPException(
+            status_code=500,
+            detail={
+                "message": (
+                    "eBay did not return a refresh token."
+                )
+            },
+        )
+
+    return {
+        "status": "OAuth successful",
+
+        "message": (
+            "Copy this refresh token and add it "
+            "to the EBAY_REFRESH_TOKEN environment "
+            "variable in Vercel."
+        ),
+
+        "refresh_token": refresh_token,
+
+        "expires_in": token_data.get(
+            "refresh_token_expires_in"
+        ),
+    }
+
+
+# ============================================================
+# Step 3: Get Fresh Access Token
 # ============================================================
 
 def get_access_token():
@@ -113,44 +253,45 @@ def get_access_token():
         credentials.encode()
     ).decode()
 
-    token_headers = {
+    headers = {
         "Content-Type": (
             "application/x-www-form-urlencoded"
         ),
+
         "Authorization": (
             f"Basic {encoded_credentials}"
         ),
     }
 
-    token_data = {
+    data = {
         "grant_type": "refresh_token",
+
         "refresh_token": refresh_token,
     }
 
-    token_response = requests.post(
+    response = requests.post(
         EBAY_TOKEN_URL,
-        headers=token_headers,
-        data=token_data,
+        headers=headers,
+        data=data,
         timeout=30,
     )
 
-    if token_response.status_code != 200:
+    if response.status_code != 200:
 
         raise HTTPException(
-            status_code=token_response.status_code,
+            status_code=response.status_code,
             detail={
                 "message": (
                     "eBay access token refresh failed"
                 ),
-                "ebay_response": (
-                    token_response.text
-                ),
+
+                "ebay_response": response.text,
             },
         )
 
-    token_json = token_response.json()
+    token_data = response.json()
 
-    access_token = token_json.get(
+    access_token = token_data.get(
         "access_token"
     )
 
@@ -160,9 +301,8 @@ def get_access_token():
             status_code=500,
             detail={
                 "message": (
-                    "eBay did not return an access token"
-                ),
-                "ebay_response": token_json,
+                    "eBay did not return an access token."
+                )
             },
         )
 
@@ -170,7 +310,7 @@ def get_access_token():
 
 
 # ============================================================
-# Step 2: Test eBay Authentication
+# Step 4: Test Authentication
 # ============================================================
 
 @app.get("/ebay/test-auth")
@@ -179,7 +319,10 @@ def test_auth():
     access_token = get_access_token()
 
     return {
-        "status": "eBay authentication successful",
+        "status": (
+            "eBay authentication successful"
+        ),
+
         "access_token_received": bool(
             access_token
         ),
@@ -187,27 +330,28 @@ def test_auth():
 
 
 # ============================================================
-# Step 3: Traffic Report
+# Step 5: Traffic Report
 # ============================================================
 
 def get_traffic_report(access_token):
 
-    traffic_end_date = (
+    end_date = (
         date.today() - timedelta(days=1)
     )
 
-    traffic_start_date = (
-        traffic_end_date - timedelta(days=6)
+    start_date = (
+        end_date - timedelta(days=6)
     )
 
-    traffic_headers = {
+    headers = {
         "Authorization": (
             f"Bearer {access_token}"
         ),
+
         "Accept": "application/json",
     }
 
-    traffic_params = {
+    params = {
 
         "dimension": "DAY",
 
@@ -215,9 +359,9 @@ def get_traffic_report(access_token):
             f"marketplace_ids:{{EBAY_US}},"
             f"date_range:"
             f"["
-            f"{traffic_start_date.strftime('%Y%m%d')}"
+            f"{start_date.strftime('%Y%m%d')}"
             f".."
-            f"{traffic_end_date.strftime('%Y%m%d')}"
+            f"{end_date.strftime('%Y%m%d')}"
             f"]"
         ),
 
@@ -231,8 +375,8 @@ def get_traffic_report(access_token):
 
     response = requests.get(
         EBAY_TRAFFIC_URL,
-        headers=traffic_headers,
-        params=traffic_params,
+        headers=headers,
+        params=params,
         timeout=30,
     )
 
@@ -244,53 +388,51 @@ def get_traffic_report(access_token):
                 "message": (
                     "Traffic Report API failed"
                 ),
-                "request_url": response.url,
+
                 "ebay_response": response.text,
             },
         )
 
     return {
         "date_range": {
-            "start": (
-                traffic_start_date.isoformat()
-            ),
-            "end": (
-                traffic_end_date.isoformat()
-            ),
+            "start": start_date.isoformat(),
+            "end": end_date.isoformat(),
         },
+
         "data": response.json(),
     }
 
 
 # ============================================================
-# Step 4: Orders
+# Step 6: Orders
 # ============================================================
 
 def get_orders(access_token):
 
-    orders_end_date = (
+    end_date = (
         date.today() - timedelta(days=1)
     )
 
-    orders_start_date = (
-        orders_end_date - timedelta(days=30)
+    start_date = (
+        end_date - timedelta(days=30)
     )
 
-    orders_headers = {
+    headers = {
         "Authorization": (
             f"Bearer {access_token}"
         ),
+
         "Accept": "application/json",
     }
 
-    orders_params = {
+    params = {
 
         "filter": (
             f"creationdate:"
             f"["
-            f"{orders_start_date.isoformat()}"
+            f"{start_date.isoformat()}"
             f"T00:00:00.000Z.."
-            f"{orders_end_date.isoformat()}"
+            f"{end_date.isoformat()}"
             f"T23:59:59.999Z"
             f"]"
         ),
@@ -302,8 +444,8 @@ def get_orders(access_token):
 
     response = requests.get(
         EBAY_ORDERS_URL,
-        headers=orders_headers,
-        params=orders_params,
+        headers=headers,
+        params=params,
         timeout=30,
     )
 
@@ -315,46 +457,44 @@ def get_orders(access_token):
                 "message": (
                     "Orders API failed"
                 ),
-                "request_url": response.url,
+
                 "ebay_response": response.text,
             },
         )
 
     return {
         "date_range": {
-            "start": (
-                orders_start_date.isoformat()
-            ),
-            "end": (
-                orders_end_date.isoformat()
-            ),
+            "start": start_date.isoformat(),
+            "end": end_date.isoformat(),
         },
+
         "data": response.json(),
     }
 
 
 # ============================================================
-# Step 5: Inventory
+# Step 7: Inventory
 # ============================================================
 
 def get_inventory(access_token):
 
-    inventory_headers = {
+    headers = {
         "Authorization": (
             f"Bearer {access_token}"
         ),
+
         "Accept": "application/json",
     }
 
-    inventory_params = {
+    params = {
         "limit": 100,
         "offset": 0,
     }
 
     response = requests.get(
         EBAY_INVENTORY_URL,
-        headers=inventory_headers,
-        params=inventory_params,
+        headers=headers,
+        params=params,
         timeout=30,
     )
 
@@ -366,7 +506,7 @@ def get_inventory(access_token):
                 "message": (
                     "Inventory API failed"
                 ),
-                "request_url": response.url,
+
                 "ebay_response": response.text,
             },
         )
@@ -375,7 +515,7 @@ def get_inventory(access_token):
 
 
 # ============================================================
-# Step 6: Complete eBay Data Extraction
+# Step 8: Complete eBay Data Extraction
 # ============================================================
 
 @app.get("/ebay/data")
