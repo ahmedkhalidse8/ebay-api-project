@@ -337,7 +337,7 @@ def get_traffic_report(access_token):
 
     end_date = date.today() - timedelta(days=1)
 
-    start_date = end_date - timedelta(days=730)
+    start_date = end_date - timedelta(days=729)
 
     headers = {
         "Authorization": f"Bearer {access_token}",
@@ -429,58 +429,74 @@ def get_traffic_report(access_token):
 
 def get_orders(access_token):
 
-    end_date = (
-        date.today() - timedelta(days=1)
-    )
+    end_date = date.today() - timedelta(days=1)
 
-    start_date = (
-        end_date - timedelta(days=30)
-    )
+    start_date = end_date - timedelta(days=730)
 
     headers = {
-        "Authorization": (
-            f"Bearer {access_token}"
-        ),
-
+        "Authorization": f"Bearer {access_token}",
         "Accept": "application/json",
     }
 
-    params = {
+    all_orders = []
 
-        "filter": (
-            f"creationdate:"
-            f"["
-            f"{start_date.isoformat()}"
-            f"T00:00:00.000Z.."
-            f"{end_date.isoformat()}"
-            f"T23:59:59.999Z"
-            f"]"
-        ),
+    limit = 200
+    offset = 0
 
-        "limit": 50,
+    while True:
 
-        "offset": 0,
-    }
+        params = {
+            "filter": (
+                f"creationdate:"
+                f"["
+                f"{start_date.isoformat()}T00:00:00.000Z"
+                f".."
+                f"{end_date.isoformat()}T23:59:59.999Z"
+                f"]"
+            ),
 
-    response = requests.get(
-        EBAY_ORDERS_URL,
-        headers=headers,
-        params=params,
-        timeout=30,
-    )
+            "limit": limit,
 
-    if response.status_code != 200:
+            "offset": offset,
+        }
 
-        raise HTTPException(
-            status_code=response.status_code,
-            detail={
-                "message": (
-                    "Orders API failed"
-                ),
-
-                "ebay_response": response.text,
-            },
+        response = requests.get(
+            EBAY_ORDERS_URL,
+            headers=headers,
+            params=params,
+            timeout=30,
         )
+
+        if response.status_code != 200:
+
+            raise HTTPException(
+                status_code=response.status_code,
+                detail={
+                    "message": "Orders API failed",
+
+                    "offset": offset,
+
+                    "ebay_response": response.text,
+                },
+            )
+
+        data = response.json()
+
+        orders = data.get("orders", [])
+
+        all_orders.extend(orders)
+
+        total = data.get("total", 0)
+
+        print(
+            f"Orders retrieved: "
+            f"{len(all_orders)} / {total}"
+        )
+
+        if not data.get("next"):
+            break
+
+        offset += limit
 
     return {
         "date_range": {
@@ -488,7 +504,9 @@ def get_orders(access_token):
             "end": end_date.isoformat(),
         },
 
-        "data": response.json(),
+        "total_orders": len(all_orders),
+
+        "orders": all_orders,
     }
 
 
