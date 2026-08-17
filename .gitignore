@@ -7,3 +7,5 @@ __pycache__/
 ebay_analytics/target/
 ebay_analytics/dbt_packages/
 ebay_analytics/logs/
+processed/orders.csv
+processed/inventory.csv
