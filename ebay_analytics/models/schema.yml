@@ -1,0 +1,62 @@
+version: 2
+
+models:
+
+  - name: stg_orders
+    description: "Cleaned eBay order data."
+    columns:
+
+      - name: order_id
+        description: "Unique eBay order identifier."
+        data_tests:
+          - not_null
+          - unique
+
+      - name: order_date
+        data_tests:
+          - not_null
+
+      - name: title
+        data_tests:
+          - not_null
+
+      - name: quantity
+        data_tests:
+          - not_null
+
+
+  - name: stg_traffic
+    description: "Daily eBay traffic and conversion data."
+    columns:
+
+      - name: date
+        data_tests:
+          - not_null
+
+      - name: impressions
+        data_tests:
+          - not_null
+
+      - name: views
+        data_tests:
+          - not_null
+
+
+  - name: stg_inventory
+    description: "Current eBay inventory data."
+    columns:
+
+      - name: sku
+        description: "eBay inventory SKU."
+        data_tests:
+          - not_null
+          - unique
+
+
+  - name: fct_orders
+    description: "Analytical order fact table."
+    columns:
+
+      - name: order_id
+        data_tests:
+          - not_null

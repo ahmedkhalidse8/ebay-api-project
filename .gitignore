@@ -1,2 +1,9 @@
+.env
+.venv/
+raw/
+logs/
 __pycache__/
 *.pyc
+ebay_analytics/target/
+ebay_analytics/dbt_packages/
+ebay_analytics/logs/
