@@ -1,13 +1,16 @@
 import os
 import base64
 import secrets
+import hashlib
 import requests
 
 from datetime import date, timedelta
 
-from fastapi import FastAPI, HTTPException
+from dotenv import load_dotenv
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import RedirectResponse
 
+load_dotenv()
 
 app = FastAPI()
 
@@ -67,14 +70,45 @@ def home():
 
 
 # ============================================================
-# Marketplace Deletion
+# Marketplace Account Deletion
 # ============================================================
 
 @app.get("/ebay/marketplace-deletion")
-def marketplace_deletion():
+def marketplace_deletion(challenge_code: str):
+
+    verification_token = get_env(
+        "EBAY_VERIFICATION_TOKEN"
+    )
+
+    endpoint = (
+        "https://salesanalytics-ahmed.vercel.app"
+        "/ebay/marketplace-deletion"
+    )
+
+    challenge_response = hashlib.sha256(
+        (
+            challenge_code
+            + verification_token
+            + endpoint
+        ).encode("utf-8")
+    ).hexdigest()
 
     return {
-        "status": "endpoint is working"
+        "challengeResponse": challenge_response
+    }
+
+
+@app.post("/ebay/marketplace-deletion")
+async def marketplace_deletion_notification(
+    request: Request
+):
+
+    # Receive the eBay notification.
+    # eBay requires an immediate successful HTTP response.
+    await request.json()
+
+    return {
+        "status": "acknowledged"
     }
 
 
@@ -100,6 +134,10 @@ def debug_env():
 
         "refresh_token_present": bool(
             os.getenv("EBAY_REFRESH_TOKEN")
+        ),
+
+        "verification_token_present": bool(
+            os.getenv("EBAY_VERIFICATION_TOKEN")
         ),
     }
 
@@ -265,7 +303,6 @@ def get_access_token():
 
     data = {
         "grant_type": "refresh_token",
-
         "refresh_token": refresh_token,
     }
 
@@ -411,7 +448,9 @@ def get_traffic_report(access_token):
             f"({len(records)} records)"
         )
 
-        current_start = current_end + timedelta(days=1)
+        current_start = (
+            current_end + timedelta(days=1)
+        )
 
     return {
         "date_range": {
