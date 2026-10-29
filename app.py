@@ -624,3 +624,67 @@ def ebay_data():
 
         "inventory": inventory,
     }
+
+# ============================================================
+# Listing-level traffic for the Image A vs Image B experiment
+# ============================================================
+
+@app.get("/ebay/listing-traffic")
+def listing_traffic():
+
+    access_token = get_access_token()
+
+    end_date = date.today() - timedelta(days=1)
+    start_date = end_date - timedelta(days=89)
+
+    listing_ids = "227307906290|226991664030"
+
+    headers = {
+        "Authorization": f"Bearer {access_token}",
+        "Accept": "application/json",
+    }
+
+    params = {
+        "dimension": "LISTING",
+        "filter": (
+            f"listing_ids:{{{listing_ids}}},"
+            f"date_range:"
+            f"[{start_date.strftime('%Y%m%d')}"
+            f"..{end_date.strftime('%Y%m%d')}]"
+        ),
+        "metric": (
+            "TOTAL_IMPRESSION_TOTAL,"
+            "LISTING_VIEWS_TOTAL,"
+            "TRANSACTION,"
+            "SALES_CONVERSION_RATE"
+        ),
+    }
+
+    response = requests.get(
+        EBAY_TRAFFIC_URL,
+        headers=headers,
+        params=params,
+        timeout=30,
+    )
+
+    if response.status_code != 200:
+        raise HTTPException(
+            status_code=response.status_code,
+            detail={
+                "message": "Listing-level Traffic Report API failed",
+                "ebay_response": response.text,
+            },
+        )
+
+    return {
+        "status": "Listing-level traffic retrieved",
+        "date_range": {
+            "start": start_date.isoformat(),
+            "end": end_date.isoformat(),
+        },
+        "listing_ids": [
+            "227307906290",
+            "226991664030",
+        ],
+        "report": response.json(),
+    }
