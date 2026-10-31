@@ -259,6 +259,94 @@ def transform_orders():
 
 
 # ============================================================
+# 3. Transform Buyer Analysis
+# ============================================================
+
+def transform_buyer_analysis():
+
+    print("=" * 60)
+    print("Transforming buyer analysis...")
+    print("=" * 60)
+
+    raw = load_json("orders.json")
+    orders = raw.get("orders", [])
+
+    rows = []
+
+    for order in orders:
+
+        buyer = order.get("buyer", {})
+        username = buyer.get("username")
+
+        if not username:
+            continue
+
+        pricing = order.get("pricingSummary", {})
+        payment = order.get("paymentSummary", {})
+
+        rows.append({
+            "buyer_key": username,
+            "order_id": order.get("orderId"),
+            "order_date": order.get("creationDate"),
+            "order_total": (
+                pricing.get("total", {}).get("value")
+            ),
+            "seller_proceeds": (
+                payment.get("totalDueSeller", {}).get("value")
+            ),
+        })
+
+    df = pd.DataFrame(rows)
+
+    if df.empty:
+        print("No buyer records available.")
+        return df
+
+    df["order_date"] = pd.to_datetime(
+        df["order_date"], errors="coerce", utc=True
+    )
+
+    for column in ["order_total", "seller_proceeds"]:
+        df[column] = pd.to_numeric(df[column], errors="coerce")
+
+    # Stable pseudonymous IDs; raw usernames are never exported.
+    buyer_ids = {
+        username: f"BUYER_{index:03d}"
+        for index, username in enumerate(
+            sorted(df["buyer_key"].unique()), start=1
+        )
+    }
+
+    df["buyer_id"] = df["buyer_key"].map(buyer_ids)
+
+    buyer_summary = (
+        df.groupby("buyer_id")
+        .agg(
+            order_count=("order_id", "nunique"),
+            first_order_date=("order_date", "min"),
+            last_order_date=("order_date", "max"),
+            customer_sales=("order_total", "sum"),
+            seller_proceeds=("seller_proceeds", "sum"),
+        )
+        .reset_index()
+    )
+
+    buyer_summary["repeat_buyer"] = (
+        buyer_summary["order_count"] > 1
+    )
+
+    buyer_summary = buyer_summary.drop(
+        columns=[], errors="ignore"
+    )
+
+    save_csv("buyer_analysis.csv", buyer_summary)
+
+    print("Unique buyers:", len(buyer_summary))
+    print("Repeat buyers:", int(buyer_summary["repeat_buyer"].sum()))
+
+    return buyer_summary
+
+# ============================================================
 # 3. Transform Inventory
 # ============================================================
 
@@ -350,7 +438,7 @@ def main():
     traffic_df = transform_traffic()
 
     orders_df = transform_orders()
-
+    buyer_df = transform_buyer_analysis()
     inventory_df = transform_inventory()
 
     print("=" * 60)

@@ -1,0 +1,2 @@
+data_type,visitors_per_group,control_conversions,treatment_conversions,control_rate,treatment_rate,absolute_difference,relative_lift,ci_95_lower,ci_95_upper,p_value,significant_at_5_pct
+synthetic,10000,178,243,0.0178,0.0243,0.006499999999999999,0.36516853932584264,0.0025220615198391725,0.010477938480160825,0.001365792872565706,True

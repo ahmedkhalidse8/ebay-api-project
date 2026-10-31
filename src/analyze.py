@@ -68,6 +68,58 @@ print(f"Average order value: ${average_order_value:.2f}")
 
 
 # ============================================================
+# BUYER ANALYSIS
+# ============================================================
+
+buyer_analysis = pd.read_csv(
+    PROCESSED_DIR / "buyer_analysis.csv"
+)
+
+total_buyers = len(buyer_analysis)
+
+repeat_buyers = int(
+    buyer_analysis["repeat_buyer"].sum()
+)
+
+repeat_buyer_rate = (
+    repeat_buyers / total_buyers
+    if total_buyers > 0
+    else 0
+)
+
+orders_from_repeat_buyers = int(
+    buyer_analysis.loc[
+        buyer_analysis["repeat_buyer"],
+        "order_count"
+    ].sum()
+)
+
+print("\n" + "=" * 60)
+print("BUYER ANALYSIS")
+print("=" * 60)
+
+print(f"Unique buyers:              {total_buyers}")
+print(f"Repeat buyers:              {repeat_buyers}")
+print(f"Repeat-buyer rate:          {repeat_buyer_rate:.2%}")
+print(
+    f"Orders from repeat buyers:  "
+    f"{orders_from_repeat_buyers}"
+)
+
+# Save aggregate metrics only; no buyer-level records.
+buyer_metrics = pd.DataFrame([{
+    "unique_buyers": total_buyers,
+    "repeat_buyers": repeat_buyers,
+    "repeat_buyer_rate": repeat_buyer_rate,
+    "orders_from_repeat_buyers": orders_from_repeat_buyers,
+}])
+
+buyer_metrics.to_csv(
+    PROCESSED_DIR / "buyer_metrics.csv",
+    index=False
+)
+
+# ============================================================
 # PRODUCT PERFORMANCE
 # ============================================================
 

@@ -9,3 +9,8 @@ ebay_analytics/dbt_packages/
 ebay_analytics/logs/
 processed/orders.csv
 processed/inventory.csv
+# Private buyer-level analysis
+processed/buyer_analysis.csv
+
+# Local backup; do not publish
+app_backup.py
